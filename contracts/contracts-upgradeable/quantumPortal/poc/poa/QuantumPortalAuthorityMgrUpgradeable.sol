@@ -218,4 +218,81 @@ contract QuantumPortalAuthorityMgrUpgradeable is
         }
         return (true, validators);
     }
+
+    /**
+     @notice Returns if the digest can be verified. It maps the signers to the delegates after verifying the signatures.
+     @param digest The digest
+     @param multiSignature The signatures formatted as a multisig. Note that this
+        format requires signatures to be sorted in the order of signers (as bytes)
+     @return result Identifies success or failure
+     @return validators Lis of validators.
+     */
+    function tryVerifyDigestWithAddressWithMinSigCheckForOperators(
+        bytes32 digest,
+        bytes memory multiSignature
+    ) internal view returns (bool result, address[] memory validators) {
+        MultiSigCheckableStorageV001 storage $ = _getMultiSigCheckableStorageV001();
+        if (multiSignature.length == 0) {
+            revert SignarureIsEmpty(multiSignature);
+        }
+        MultiSigLib.Sig[] memory signatures = MultiSigLib.parseSig(
+            multiSignature
+        );
+        if (signatures.length == 0) {
+            revert SignarureIsEmpty(multiSignature);
+        }
+        validators = new address[](signatures.length);
+
+        address _signer = ECDSA.recover(
+            digest,
+            signatures[0].v,
+            signatures[0].r,
+            signatures[0].s
+        );
+        address lastSigner = _signer;
+
+        OperatorRelationStorageV001 storage $opRel = _getOperatorRelationStorageV001();
+        IOperatorRelation.Relationship memory sigerDelegate = $opRel.delegateLookup[_signer];
+        if (sigerDelegate.delegate == address(0) || sigerDelegate.deleted == 1) {
+            revert OperatorHasNoValidator(_signer);
+        }
+        validators[0] = sigerDelegate.delegate;
+        address quorumId = $.quorumSubscriptions[sigerDelegate.delegate].id;
+        if (quorumId == address(0)) {
+            return (false, new address[](0));
+        }
+        Quorum memory q = $.quorums[quorumId];
+        for (uint256 i = 1; i < signatures.length; i++) {
+            _signer = ECDSA.recover(
+                digest,
+                signatures[i].v,
+                signatures[i].r,
+                signatures[i].s
+            );
+            sigerDelegate = $opRel.delegateLookup[_signer];
+            if (sigerDelegate.delegate == address(0) || sigerDelegate.deleted == 1) {
+                revert OperatorHasNoValidator(_signer);
+            }
+            quorumId = $.quorumSubscriptions[sigerDelegate.delegate].id;
+            if (quorumId == address(0)) {
+                return (false, new address[](0));
+            }
+            require(
+                q.id == quorumId,
+                "MSC: all signers must be of same quorum"
+            );
+
+            validators[i] = sigerDelegate.delegate;
+            // This ensures there are no duplicate signers
+            if (lastSigner >= _signer) {
+                revert SignaturesAreNoteSorted(lastSigner, _signer);
+            }
+            lastSigner = _signer;
+        }
+
+        if (validators.length < q.minSignatures) {
+            revert NotEnoughSignatures(q.minSignatures, validators.length);
+        }
+        return (true, validators);
+    }
 }
