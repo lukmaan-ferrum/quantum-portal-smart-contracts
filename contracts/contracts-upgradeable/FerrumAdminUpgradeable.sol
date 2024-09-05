@@ -9,10 +9,10 @@ import {MultiSigCheckableUpgradeable} from "foundry-contracts/contracts/contract
  * @notice Intended to be inherited by Quantum Portal Gateway contract
  */
 abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
-    // HARDCODE THESE TO VALUES SUCH THAT TIMELOCKED_PROD > PROD > BETA
-    address public constant BETA_QUORUMID = address(123);
-    address public constant PROD_QUORUMID = address(456);
-    address public constant TIMELOCKED_PROD_QUORUMID = address(789);
+    // All other lower level (more leniet) quorums are less in value
+    address public constant BETA_QUORUMID = address(1111);
+    address public constant PROD_QUORUMID = address(2222);
+    address public constant TIMELOCKED_PROD_QUORUMID = address(3333);
     bytes32 constant PERMIT_CALL_TYPEHASH = keccak256("PermitCall(address target,bytes data,address quorumId,bytes32 salt,uint256 expiry)");
 
     /// @custom:storage-location erc7201:ferrum.storage.ferrumadmin.001
@@ -59,35 +59,23 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         _;
     }
 
-    /**
-     * @dev Always pass in the Quorums array in this order:
-     * index 0: BETA_QUORUMID
-     * index 1: PROD_QUORUMID
-     * index 2: TIMELOCKED_PROD_QUORUMID
-     * @param quorums Array of quorums to initialize
-     */
     function __FerrumAdmin_init(uint256 _timelockPeriod,
-        InitQuorum[] memory quorums,
         address initialOwner,
         address initialAdmin,
         string memory name,
         string memory version
     ) internal {
-        __FerrumAdmin_init_unchained(_timelockPeriod, quorums);
         __WithAdmin_init(initialOwner, initialAdmin);
+        __FerrumAdmin_init_unchained(_timelockPeriod);
         __EIP712_init(name, version);
     }
 
     function __FerrumAdmin_init_unchained(
-        uint256 _timelockPeriod,
-        InitQuorum[] memory quorums
+        uint256 _timelockPeriod
     ) internal {
-        _initializeQuorum(BETA_QUORUMID, 0, quorums[0].minSignatures, 0, quorums[0].addresses);
-        _initializeQuorum(PROD_QUORUMID, 0, quorums[1].minSignatures, 0, quorums[1].addresses);
-        _initializeQuorum(TIMELOCKED_PROD_QUORUMID, 0, quorums[2].minSignatures, 0, quorums[2].addresses);
-
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
         $.timelockPeriod = _timelockPeriod;
+        $.devAccounts[tx.origin] = true;
     }
 
     function permitCall(
@@ -160,7 +148,15 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         emit CallExecuted(structHash, target, data);
     }
 
-    function addDevAccounts(address[] memory account) external onlyDevsOrAdmin {
+    function setQuorums(
+        InitQuorum[3] calldata quorums
+    ) external onlyAdmin {
+        _initializeQuorum(BETA_QUORUMID, 0, quorums[0].minSignatures, 0, quorums[0].addresses);
+        _initializeQuorum(PROD_QUORUMID, 0, quorums[1].minSignatures, 0, quorums[1].addresses);
+        _initializeQuorum(TIMELOCKED_PROD_QUORUMID, 0, quorums[2].minSignatures, 0, quorums[2].addresses);
+    }
+
+    function addDevAccounts(address[] memory account) public onlyDevsOrAdmin {
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
         for (uint i = 0; i < account.length; i++) {
             if($.devAccounts[account[i]]) continue; // Prevents redundant event emission

@@ -32,11 +32,10 @@ describe("Proxy version", function () {
 
     beforeEach(async function () {
         await loadFixture(deploymentFixture);
-        await gateway.addDevAccounts([owner])
         settings  = [{
             quorumId: await gateway.BETA_QUORUMID(),
             target: poc.target,
-            funcSelector: poc.interface.getFunction("setFeeToken", ["address"]).selector,
+            funcSelector: poc!.interface!.getFunction("setFeeToken", ["address"]).selector,
         },
         {
             quorumId: await gateway.PROD_QUORUMID(),
@@ -56,8 +55,7 @@ describe("Proxy version", function () {
     });
 
     it("Should allow devs to initially set auth levels for each call correctly", async function () {
-        await gateway.setCallAuthLevels(settings)
-        
+        await gateway.setCallAuthLevels(settings)   
         expect(await gateway.minRequiredAuth(settings[0].target, settings[0].funcSelector)).to.equal(settings[0].quorumId);
         expect(await gateway.minRequiredAuth(settings[1].target, settings[1].funcSelector)).to.equal(settings[1].quorumId);
         expect(await gateway.minRequiredAuth(settings[2].target, settings[2].funcSelector)).to.equal(settings[2].quorumId);

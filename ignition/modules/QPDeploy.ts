@@ -22,36 +22,9 @@ const deployModule = buildModule("DeployModule", (m) => {
     const gatewayImpl = m.contract("QuantumPortalGatewayUpgradeable", ["0x0000000000000000000000000000000000000000"], { id: "QPGatewayImpl"})
 
     const timelockPeriod = 60 * 60 * 24 * 1 // 1 day
-    const quorums = [
-        {
-            minSignatures: 2,
-            addresses: [
-                owner,
-                signer1,
-            ]
-        },
-        {
-            minSignatures: 2,
-            addresses: [
-                signer2,
-                signer3,
-                signer4,
-            ]
-        },
-        {
-            minSignatures: 2,
-            addresses: [
-                signer5,
-                signer6,
-                signer7
-            ]
-        },
-    ];
 
     let initializeCalldata: any = m.encodeFunctionCall(gatewayImpl, "initialize", [
         timelockPeriod,
-        quorums,
-
 		owner,
 		owner
 	]);
@@ -137,6 +110,34 @@ const deployModule = buildModule("DeployModule", (m) => {
     
 	m.call(minerMgr, "updateBaseToken", [conf.FRM[currentChainId!]])
 	m.call(ledgerMgr, "updateLedger", [poc], { id: "UpdateLedgerOnLedgerMgr"})
+
+    const quorums = [
+        {
+            minSignatures: 2,
+            addresses: [
+                owner,
+                signer1,
+            ]
+        },
+        {   
+            minSignatures: 2,
+            addresses: [
+                signer2,
+                signer3,
+                signer4,
+            ]
+        },
+        {
+            minSignatures: 2,
+            addresses: [
+                signer5,
+                signer6,
+                signer7
+            ]
+        },
+    ];
+
+    m.call(gateway, "setQuorums", [quorums])
 
     // SET FEEPERBYTE ON FEECONVERTERDIRECT
 

@@ -40,13 +40,11 @@ contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, Ferr
     }
 
     function initialize(uint256 _timelockPeriod,
-        InitQuorum[] memory quorums,
         address initialOwner,
         address initialAdmin
     ) public initializer {
         __FerrumAdmin_init(
             _timelockPeriod,
-            quorums,
             initialOwner,
             initialAdmin,
             NAME,
