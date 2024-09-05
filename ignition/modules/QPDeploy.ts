@@ -10,10 +10,48 @@ const deployModule = buildModule("DeployModule", (m) => {
     const currentChainId = 26100
     const conf: QpDeployConfig = loadQpDeployConfig(process.env.QP_CONFIG_FILE || DEFAULT_QP_CONFIG_FILE);
     const owner = m.getAccount(0)
+    const signer1 = m.getAccount(1)
+    const signer2 = m.getAccount(2)
+    const signer3 = m.getAccount(3)
+    const signer4 = m.getAccount(4)
+    const signer5 = m.getAccount(5)
+    const signer6 = m.getAccount(6)
+    const signer7 = m.getAccount(7)
 
     //--------------- Gateway ----------------//
     const gatewayImpl = m.contract("QuantumPortalGatewayUpgradeable", ["0x0000000000000000000000000000000000000000"], { id: "QPGatewayImpl"})
+
+    const timelockPeriod = 60 * 60 * 24 * 1 // 1 day
+    const quorums = [
+        {
+            minSignatures: 2,
+            addresses: [
+                owner,
+                signer1,
+            ]
+        },
+        {
+            minSignatures: 2,
+            addresses: [
+                signer2,
+                signer3,
+                signer4,
+            ]
+        },
+        {
+            minSignatures: 2,
+            addresses: [
+                signer5,
+                signer6,
+                signer7
+            ]
+        },
+    ];
+
     let initializeCalldata: any = m.encodeFunctionCall(gatewayImpl, "initialize", [
+        timelockPeriod,
+        quorums,
+
 		owner,
 		owner
 	]);
@@ -99,10 +137,6 @@ const deployModule = buildModule("DeployModule", (m) => {
     
 	m.call(minerMgr, "updateBaseToken", [conf.FRM[currentChainId!]])
 	m.call(ledgerMgr, "updateLedger", [poc], { id: "UpdateLedgerOnLedgerMgr"})
-
-
-    // ADD UPDATE FEE TARGETS ON LEDGERMGR
-    m.call(ledgerMgr, "updateFeeTargets", [minerMgr, minerMgr])
 
     // SET FEEPERBYTE ON FEECONVERTERDIRECT
 
