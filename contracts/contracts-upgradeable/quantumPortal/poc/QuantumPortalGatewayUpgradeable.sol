@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UUPSUpgradeable, Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {WithAdminUpgradeable} from "foundry-contracts/contracts/contracts-upgradeable/common/WithAdminUpgradeable.sol";
 import {SafeAmount} from "foundry-contracts/contracts/contracts/common/SafeAmount.sol";
+import {FerrumAdminUpgradeable} from "../../FerrumAdminUpgradeable.sol";
 import {IQuantumPortalLedgerMgr, IQuantumPortalLedgerMgrDependencies} from "../../../quantumPortal/poc/IQuantumPortalLedgerMgr.sol";
 import {IQuantumPortalStakeWithDelegate} from "../../../quantumPortal/poc/poa/stake/IQuantumPortalStakeWithDelegate.sol";
 import {IQuantumPortalPoc} from "../../../quantumPortal/poc/IQuantumPortalPoc.sol";
@@ -18,7 +18,8 @@ import {IUUPSUpgradeable} from "./utils/IUUPSUpgradeable.sol";
  *     upate of QP contract logics. Always use this contract to interact
  *     with QP
  */
-contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, WithAdminUpgradeable {
+contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, FerrumAdminUpgradeable {
+    string public constant NAME = "FERRUM_QUANTUM_PORTAL_GATEWAY";
     string public constant VERSION = "000.010";
     /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     address public immutable WFRM;
@@ -38,8 +39,17 @@ contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, With
         WFRM = _wfrm;
     }
 
-    function initialize(address initialOwner, address initialAdmin) public initializer {
-        __WithAdmin_init(initialOwner, initialAdmin);
+    function initialize(uint256 _timelockPeriod,
+        address initialOwner,
+        address initialAdmin
+    ) public initializer {
+        __FerrumAdmin_init(
+            _timelockPeriod,
+            initialOwner,
+            initialAdmin,
+            NAME,
+            VERSION
+        );
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
