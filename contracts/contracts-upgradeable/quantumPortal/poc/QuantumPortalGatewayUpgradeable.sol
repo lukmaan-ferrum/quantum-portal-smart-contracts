@@ -52,7 +52,7 @@ contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, Ferr
         );
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyAdmin {}
 
     function _getQuantumPortalGatewayStorageV001() internal pure returns (QuantumPortalGatewayStorageV001 storage $) {
         assembly {
@@ -95,21 +95,13 @@ contract QuantumPortalGatewayUpgradeable is Initializable, UUPSUpgradeable, Ferr
                 .minerMgr();
     }
 
-    function upgradeQpComponentAndCall(
-        address target,
-        address newImplementation,
-        bytes calldata data
-    ) external onlyOwner {
-        IUUPSUpgradeable(target).upgradeToAndCall(newImplementation, data);
-    }
-
     /**
-     * @notice Restricted: Upgrade the contract
+     * @notice Restricted: Update the addresses for poc (the ledger), ledger manager and stake
      * @param poc The POC contract
      * @param ledgerMgr The ledger manager
      * @param qpStake The stake
      */
-    function upgrade(
+    function updateQpAddresses(
         address poc,
         address ledgerMgr,
         address qpStake

@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {MultiSigCheckableUpgradeable} from "foundry-contracts/contracts/contracts-upgradeable/signature/MultiSigCheckableUpgradeable.sol";
 
-
 /**
  * @title FerrumAdmin
  * @notice Intended to be inherited by Quantum Portal Gateway contract
@@ -13,11 +12,12 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
     address public constant BETA_QUORUMID = address(1111);
     address public constant PROD_QUORUMID = address(2222);
     address public constant TIMELOCKED_PROD_QUORUMID = address(3333);
-    bytes32 constant PERMIT_CALL_TYPEHASH = keccak256("PermitCall(address target,bytes data,address quorumId,bytes32 salt,uint256 expiry)");
+
+    uint256 public constant EXPIRY_7_DAYS = 7 days;
+    bytes32 constant PERMIT_CALL_TYPEHASH = keccak256("PermitCall(address target,bytes data,address quorumId,bytes32 salt)");
 
     /// @custom:storage-location erc7201:ferrum.storage.ferrumadmin.001
     struct FerrumAdminStorageV001 {
-        bool authInitialized;
         uint256 timelockPeriod;
         mapping(address => bool) devAccounts;
         mapping(bytes32 => FerrumAdminUpgradeable.PermittedCall) permittedCalls;
@@ -87,19 +87,19 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         bytes memory multiSignature
     ) external {
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
+        _isValidQourumId(quorumId);
         bytes32 structHash = keccak256(
             abi.encode(
                 PERMIT_CALL_TYPEHASH,
                 target,
                 keccak256(data),
                 quorumId,
-                salt,
-                expiry
+                salt
             )
         );
 
         // Verify
-        require(expiry < block.timestamp + 7 days, "Expiry too far");
+        require(expiry < block.timestamp + EXPIRY_7_DAYS, "Expiry too far");
         _validateAuthLevel(target, data, quorumId);
         verifyUniqueSaltWithQuorumId(structHash, quorumId, salt, 0, multiSignature);
 
@@ -117,8 +117,7 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         address target,
         bytes calldata data,
         address quorumId,
-        bytes32 salt,
-        uint64 expiry
+        bytes32 salt
     ) external onlyDevs {
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
         // Hash the call details
@@ -128,8 +127,7 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
                 target,
                 keccak256(data),
                 quorumId,
-                salt,
-                expiry
+                salt
             )
         );
 
@@ -146,14 +144,6 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         delete $.permittedCalls[structHash];
 
         emit CallExecuted(structHash, target, data);
-    }
-
-    function setQuorums(
-        InitQuorum[3] calldata quorums
-    ) external onlyAdmin {
-        _initializeQuorum(BETA_QUORUMID, 0, quorums[0].minSignatures, 0, quorums[0].addresses);
-        _initializeQuorum(PROD_QUORUMID, 0, quorums[1].minSignatures, 0, quorums[1].addresses);
-        _initializeQuorum(TIMELOCKED_PROD_QUORUMID, 0, quorums[2].minSignatures, 0, quorums[2].addresses);
     }
 
     function addDevAccounts(address[] memory account) public onlyDevsOrAdmin {
@@ -173,35 +163,27 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         }
     }
 
-    function setCallAuthLevels(
-        MinAuthSetting[] memory settings
-    ) external onlyDevs {
-        FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
-        require(!$.authInitialized, "FA: already set");
-        $.authInitialized = true;
-        _setCallAuthLevels(settings);
+    function initializeQuorum(
+        address quorumId,
+        uint64 groupId,
+        uint16 minSignatures,
+        uint8 ownerGroupId,
+        address[] calldata addresses
+    ) public override onlyAdmin {
+        _isValidQourumId(quorumId);
+        _initializeQuorum(quorumId, groupId, minSignatures, ownerGroupId, addresses);
     }
 
     function setCallAuthLevels(
-        MinAuthSetting[] memory settings,
-        bytes32 salt,
-        bytes memory multiSignature
-    ) external {
-        bytes32 callHash = keccak256(abi.encode(settings, salt));
-        verifyUniqueSaltWithQuorumId(callHash, TIMELOCKED_PROD_QUORUMID, salt, 0, multiSignature);
+        MinAuthSetting[] memory settings
+    ) external onlyAdmin {
         _setCallAuthLevels(settings);
     }
 
     function updateTimelockPeriod(
-        uint256 newPeriod,
-        bytes32 salt,
-        bytes memory multiSignature
-    ) external {
+        uint256 newPeriod
+    ) external onlyAdmin {
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
-
-        bytes32 callHash = keccak256(abi.encode(newPeriod, salt));
-        verifyUniqueSaltWithQuorumId(callHash, TIMELOCKED_PROD_QUORUMID, salt, 0, multiSignature);
-
         $.timelockPeriod = newPeriod;
     }
 
@@ -231,26 +213,31 @@ abstract contract FerrumAdminUpgradeable is MultiSigCheckableUpgradeable {
         }
     }
 
-    function _getKey(address qpContract, bytes4 funcSelector) private pure returns (bytes32) {
-        bytes32 key; // Takes the shape of 0x{4byteFuncSelector}00..00{20byteQPContractAddress}
+    function _getKey(address qpContract, bytes4 funcSelector) private pure returns (bytes32 key) {
+        // Takes the shape of 0x{4byteFuncSelector}00..00{20byteQPContractAddress}
         assembly {
-            key := or(
-                and(funcSelector, 0xffffffff00000000000000000000000000000000000000000000000000000000), // Remove this mask?
-                qpContract
-            )
+            key := or(funcSelector, qpContract)
         }
-        return key;
     }
 
     function _validateAuthLevel(address target, bytes calldata data, address quorumId) private view {
         FerrumAdminStorageV001 storage $ = _getFerrumAdminStorageV001();
         bytes32 key = _getKey(target, bytes4(data));
+        require(uint160($.minRequiredAuth[key]) != 0, "FA: call auth not set");
         require(uint160(quorumId) >= uint160($.minRequiredAuth[key]), "FA: auth");
+    }
+
+    function _isValidQourumId(address quorumId) private pure {
+        require(quorumId == BETA_QUORUMID || quorumId == PROD_QUORUMID || quorumId == TIMELOCKED_PROD_QUORUMID, "FA: invalid quorum");
     }
 
     function _getFerrumAdminStorageV001() private pure returns (FerrumAdminStorageV001 storage $) {
         assembly {
             $.slot := FerrumAdminStorageV001Location
         }
+    }
+
+    function forceRemoveFromQuorum(address _address) external override {
+        revert("Not implemented");
     }
 }

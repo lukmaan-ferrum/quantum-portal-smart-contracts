@@ -111,34 +111,6 @@ const deployModule = buildModule("DeployModule", (m) => {
 	m.call(minerMgr, "updateBaseToken", [conf.FRM[currentChainId!]])
 	m.call(ledgerMgr, "updateLedger", [poc], { id: "UpdateLedgerOnLedgerMgr"})
 
-    const quorums = [
-        {
-            minSignatures: 2,
-            addresses: [
-                owner,
-                signer1,
-            ]
-        },
-        {   
-            minSignatures: 2,
-            addresses: [
-                signer2,
-                signer3,
-                signer4,
-            ]
-        },
-        {
-            minSignatures: 2,
-            addresses: [
-                signer5,
-                signer6,
-                signer7
-            ]
-        },
-    ];
-
-    m.call(gateway, "setQuorums", [quorums])
-
     // SET FEEPERBYTE ON FEECONVERTERDIRECT
 
     return {
@@ -163,7 +135,7 @@ const configModule = buildModule("ConfigModule", (m) => {
     } = m.useModule(deployModule)
 
     m.call(poc, "updateFeeTarget")
-    m.call(gateway, "upgrade", [poc, ledgerMgr, staking])
+    m.call(gateway, "updateQpAddresses", [poc, ledgerMgr, staking])
 
     return {
         gateway,

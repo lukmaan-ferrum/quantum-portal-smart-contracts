@@ -2,10 +2,14 @@ import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import hre from "hardhat";
 import { throws, Wei, ZeroAddress } from 'foundry-contracts/dist/test/common/Utils';
-import deployModule from "../../../ignition/modules/TestContext";
+import deployModule from "../../../ignition/modules/QPDeploy";
 import { Contract, randomBytes, Signer, TypedDataEncoder } from "ethers";
 
-describe("Proxy version", function () {
+const BETA_QUORUM_ID = "0x0000000000000000000000000000000000000457"
+const PROD_QUORUM_ID = "0x00000000000000000000000000000000000008AE"
+const TIMELOCKED_PROD_QUORUM_ID = "0x0000000000000000000000000000000000000d05"
+
+describe("FerrumAdmin", function () {
     let gateway,
         ledgerMgr,
         poc,
@@ -32,21 +36,35 @@ describe("Proxy version", function () {
 
     beforeEach(async function () {
         await loadFixture(deploymentFixture);
-        settings  = [{
-            quorumId: await gateway.BETA_QUORUMID(),
-            target: poc.target,
-            funcSelector: poc!.interface!.getFunction("setFeeToken", ["address"]).selector,
-        },
-        {
-            quorumId: await gateway.PROD_QUORUMID(),
-            target: ledgerMgr.target,
-            funcSelector: ledgerMgr.interface.getFunction("updateLedger", ["address"]).selector,
-        },
-        {
-            quorumId: await gateway.TIMELOCKED_PROD_QUORUMID(),
-            target: ledgerMgr.target,
-            funcSelector: ledgerMgr.interface.getFunction("updateMinerMgr", ["address"]).selector,
-        }]
+        const quorums = [
+            {
+                minSignatures: 2,
+                addresses: [
+                    owner,
+                    signer1,
+                ]
+            },
+            {   
+                minSignatures: 2,
+                addresses: [
+                    signer2,
+                    signer3,
+                    signer4,
+                ]
+            },
+            {
+                minSignatures: 3,
+                addresses: [
+                    signer5,
+                    signer6,
+                    signer7
+                ]
+            },
+        ];
+    
+        await gateway.initializeQuorum(BETA_QUORUM_ID, 0, quorums[0].minSignatures, 0, quorums[0].addresses)
+        await gateway.initializeQuorum(PROD_QUORUM_ID, 0, quorums[1].minSignatures, 0, quorums[1].addresses)
+        await gateway.initializeQuorum(TIMELOCKED_PROD_QUORUM_ID, 0, quorums[2].minSignatures, 0, quorums[2].addresses)
     });
 
     it("Should have the correct version", async function () {
@@ -54,21 +72,7 @@ describe("Proxy version", function () {
         expect(await gateway.VERSION()).to.equal("000.010");
     });
 
-    it("Should allow devs to initially set auth levels for each call correctly", async function () {
-        await gateway.setCallAuthLevels(settings)   
-        expect(await gateway.minRequiredAuth(settings[0].target, settings[0].funcSelector)).to.equal(settings[0].quorumId);
-        expect(await gateway.minRequiredAuth(settings[1].target, settings[1].funcSelector)).to.equal(settings[1].quorumId);
-        expect(await gateway.minRequiredAuth(settings[2].target, settings[2].funcSelector)).to.equal(settings[2].quorumId);
-    })
-
-    it("Should not allow devs to change auth levels once set", async function () {
-        await gateway.setCallAuthLevels(settings)
-        const tx = gateway.setCallAuthLevels(settings)
-        await expect(tx).to.be.revertedWith("FA: already set")
-    })
-
-    it("Quorum should be able to permit a call", async function () {
-        await gateway.setCallAuthLevels(settings)
+    it("Quorum should no be able to permit a call to one that has no auth set", async function () {
         const salt = "0x" + Buffer.from(randomBytes(32)).toString("hex")
         const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 1 // 1 day
 
@@ -82,35 +86,32 @@ describe("Proxy version", function () {
             data,
             await gateway.BETA_QUORUMID(),
             salt,
-            expiry,    
             [owner, signer1]
         )
 
-        await gateway.permitCall(poc, data, await gateway.BETA_QUORUMID(), salt, expiry, multisig.sig)
+        const tx =  gateway.permitCall(poc, data, await gateway.BETA_QUORUMID(), salt, expiry, multisig.sig)
 
-        expect((await gateway.permittedCalls(multisig.structHash))[0]).to.be.true
+        await expect(tx).to.be.revertedWith("FA: call auth not set")
     })
 
     it("devs should not be able to make a call without permission", async function () {
-        await gateway.setCallAuthLevels(settings)
         await gateway.addDevAccounts([dev])
         const salt = "0x" + Buffer.from(randomBytes(32)).toString("hex")
-        const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 1 // 1 day
 
         const funcName = "setFeeToken"
         const newFeeToken = await hre.ethers.deployContract("TestToken")
         const params = [newFeeToken.target]
         const calldata = poc.interface.encodeFunctionData(funcName, params)
 
-        const tx = gateway.connect(dev).executePermittedCall(poc, calldata, await gateway.BETA_QUORUMID(), salt, expiry)
+        const tx = gateway.connect(dev).executePermittedCall(poc, calldata, await gateway.BETA_QUORUMID(), salt)
 
         await expect(tx).to.be.revertedWith("FA: not permitted")
     })
 
     it("Dev should be able to make a permitted call", async function () {
-        await gateway.setCallAuthLevels(settings)
         await gateway.addDevAccounts([dev])
         await poc.transferOwnership(gateway)
+        
         const salt = "0x" + Buffer.from(randomBytes(32)).toString("hex")
         const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 1 // 1 day
 
@@ -124,16 +125,46 @@ describe("Proxy version", function () {
             gateway,
             calldata,
             await gateway.BETA_QUORUMID(),
-            salt,
-            expiry,    
+            salt, 
             [owner, signer1]
         )
 
         await gateway.permitCall(poc, calldata, await gateway.BETA_QUORUMID(), salt, expiry, multisig.sig)
 
-        const tx = gateway.connect(dev).executePermittedCall(poc, calldata, await gateway.BETA_QUORUMID(), salt, expiry)
+        const tx = gateway.connect(dev).executePermittedCall(poc, calldata, await gateway.BETA_QUORUMID(), salt)
         await expect(tx).to.emit(gateway, "CallExecuted").withArgs(multisig.structHash, poc.target, calldata)
         expect(await poc.feeToken()).to.equal(newFeeToken.target)
+    })
+
+    it("should be able to upgrade a contract after a permitted call", async function () {
+        await gateway.addDevAccounts([dev])
+        await poc.transferOwnership(gateway)
+        
+        const salt = "0x" + Buffer.from(randomBytes(32)).toString("hex")
+        const expiry = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 2 // 1 day
+
+        const funcName = "upgradeToAndCall"
+        const newPoc = await hre.ethers.deployContract("QuantumPortalPocImplUpgradeable")
+        const data = "0x"
+        const params = [newPoc.target, data]
+        const calldata = poc.interface.encodeFunctionData(funcName, params)
+
+        const multisig = await getMultisig(
+            poc,
+            gateway,
+            calldata,
+            TIMELOCKED_PROD_QUORUM_ID,
+            salt, 
+            [signer5, signer6, signer7]
+        )
+
+        await gateway.permitCall(poc, calldata, TIMELOCKED_PROD_QUORUM_ID, salt, expiry, multisig.sig)
+        await hre.ethers.provider.send("evm_increaseTime", [60*60*24*1 + 1]);
+        const tx = gateway.connect(dev).executePermittedCall(poc, calldata, TIMELOCKED_PROD_QUORUM_ID, salt)
+
+        await expect(tx)
+        .to.emit(gateway, "CallExecuted").withArgs(multisig.structHash, poc.target, calldata).and
+        .to.emit(poc, "Upgraded").withArgs(newPoc.target)
     })
 });
 
@@ -148,7 +179,6 @@ const getMultisig = async (
     data:string,
     quorumId:string,
     salt:string,
-    expiry:number,
     signers: Signer[]    
 ) => {    
     const domain = {
@@ -163,8 +193,7 @@ const getMultisig = async (
             { name: "target", type: "address" },
             { name: "data", type: "bytes" },
             { name: "quorumId", type: "address" },
-            { name: "salt", type: "bytes32" },
-            { name: "expiry", type: "uint256" }
+            { name: "salt", type: "bytes32" }
         ],
     };
 
@@ -172,8 +201,7 @@ const getMultisig = async (
         target: targetContract.target,
         data,
         quorumId,
-        salt,
-        expiry
+        salt
     };
 
     const typedDataEncoder = new TypedDataEncoder(types)
