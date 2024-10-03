@@ -58,7 +58,7 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
      * Note: When updating fpb on Eth network, remember FRM has only 6 decimals there
      * @param fpb The fee per byte
      */
-    function updateFeePerByteX128(uint256 fpb) external onlyAdmin {
+    function updateFeePerByte(uint256 fpb) external onlyAdmin {
         _getQuantumPortalFeeConverterDirectStorageV001().feePerByte = fpb;
     }
 
@@ -70,7 +70,7 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
     /**
      * @notice Return the gas token (FRM) price for the local chain.
      */
-    function localChainGasTokenPriceX128()
+    function localChainGasTokenPrice()
         external
         view
         override
@@ -87,17 +87,17 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
     /**
      * @notice Sets the local chain gas token price.
      */
-    function setChainGasPricesX128(
+    function setChainGasPrices(
         uint256[] memory chainIds,
-        uint256[] memory nativeTokenPricesX128,
-        uint256[] memory gasPricesX128
+        uint256[] memory nativeTokenPrices,
+        uint256[] memory gasPrices
     ) external onlyAdmin {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        require(chainIds.length == nativeTokenPricesX128.length, "QPFCD: Invalid args");
-        require(chainIds.length == gasPricesX128.length, "QPFCD: Invalid args");
+        require(chainIds.length == nativeTokenPrices.length, "QPFCD: Invalid args");
+        require(chainIds.length == gasPrices.length, "QPFCD: Invalid args");
         for(uint i=0; i<chainIds.length; i++) {
-            uint256 nativePrice = nativeTokenPricesX128[i];
-            uint256 gasPrice = gasPricesX128[i];
+            uint256 nativePrice = nativeTokenPrices[i];
+            uint256 gasPrice = gasPrices[i];
             require(nativePrice != 0, "QPFCD: native price is zero");
             require(gasPrice != 0, "QPFCD: fee price is zero");
             $.feeTokenPriceList[chainIds[i]] = nativePrice;
@@ -109,19 +109,16 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
      * @notice Return the gas token (FRM) price for the target chain
      * @param targetChainId The target chain ID
      */
-    function targetChainGasTokenPriceX128(
+    function targetChainGasTokenPrice(
         uint256 targetChainId
     ) external view override returns (uint256) {
-        return _targetChainGasTokenPriceX128(targetChainId);
+        return _targetChainGasTokenPrice(targetChainId);
     }
 
     /**
      * @notice Get the fee for the target network
      */
-    function targetChainFixedFee(
-        uint256 targetChainId,
-        uint256 size
-    ) external view override returns (uint256) {
+    function fixedFee(uint256 size) external view override returns (uint256) {
         return _fixedFee(size);
     }
 
@@ -140,6 +137,25 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
         return _fixedFee(size) + _targetChainGasFee(targetChainId, gasLimit);
     }
 
+    function fixedFeeNative(uint256 size) external view returns (uint256) {
+        return _fixedFeeNative(size);
+    }
+
+    function targetChainGasFeeNative(
+        uint256 targetChainId,
+        uint256 gasLimit
+    ) external view returns (uint256) {
+        return _targetChainGasFeeNative(targetChainId, gasLimit);
+    }
+
+    function targetChainFeeNative(
+        uint256 targetChainId,
+        uint256 size,
+        uint256 gasLimit
+    ) external view returns (uint256) {
+        return _fixedFeeNative(size) + _targetChainGasFeeNative(targetChainId, gasLimit);
+    }
+
     function _fixedFee(
         uint256 size
     ) internal view returns (uint256) {
@@ -152,18 +168,33 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
         uint256 gasLimit
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        return gasLimit * $.targetChainGasPriceList[targetChainId] * _targetChainGasTokenPriceX128(targetChainId);
+        return gasLimit * $.targetChainGasPriceList[targetChainId] * _targetChainGasTokenPrice(targetChainId);
     }
 
     /**
      * @notice Return the gas token (FRM) price for the target chain
      * @param targetChainId The target chain ID
      */
-    function _targetChainGasTokenPriceX128(
+    function _targetChainGasTokenPrice(
         uint256 targetChainId
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
         return $.feeTokenPriceList[targetChainId];
+    }
+
+    function _fixedFeeNative(
+        uint256 size
+    ) internal view returns (uint256) {
+        QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
+        return _fixedFee(size) / $.feeTokenPriceList[block.chainid];
+    }
+
+    function _targetChainGasFeeNative(
+        uint256 targetChainId,
+        uint256 gasLimit
+    ) internal view returns (uint256) {
+        QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
+        return _targetChainGasFee(targetChainId, gasLimit) / $.feeTokenPriceList[block.chainid];
     }
 
     function _getQuantumPortalFeeConverterDirectStorageV001() internal pure returns (QuantumPortalFeeConverterDirectStorageV001 storage $) {

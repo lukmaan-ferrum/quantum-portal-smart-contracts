@@ -1,34 +1,56 @@
 import hre, { ethers } from "hardhat"
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers"
+import { expect } from "chai";
+import { deployAll, deployNativeFeeRepo, deployWFRM, QuantumPortalUtils } from "./QuantumPortalUtils";
 import FeeConverterDeployModule from "../../../ignition/modules/test/FeeConverter"
 
 const GWEI = 1_000_000_000n
-const FRM_PRICE = 125_000n
+const ETH_FRM_PRICE = 120_000n
+const BNB_FRM_PRICE = 30_000n
+const CHAIN1_GAS_PRICE = 5n * GWEI
+const CHAIN2_GAS_PRICE = 2n * GWEI
 
 describe("FeeConverter", function () {
-    let feeConverter
-    async function deploymentFixture() {
-        ({ feeConverter } = await hre.ignition.deploy(FeeConverterDeployModule))
-    }
+    let ctx
 
     beforeEach("should deploy and config MultiSwap", async () => {
-        await loadFixture(deploymentFixture)
-        await feeConverter.updateFeePerByteX128(ethers.parseEther("1"))
-        await feeConverter.setChainGasPricesX128([31337], [FRM_PRICE], [2n * GWEI])     
+        ctx = await deployAll();
+        const chainIds = [ctx.chain1.chainId, ctx.chain2.chainId]
+        const chainNativeToFrmPrices = [ETH_FRM_PRICE, BNB_FRM_PRICE]
+        const chainGasPrices = [CHAIN1_GAS_PRICE, CHAIN2_GAS_PRICE]
+
+        await ctx.chain1.feeConverter.setChainGasPrices(chainIds, chainNativeToFrmPrices, chainGasPrices)
     })
 
-    it("check target chain fixed fee", async function () {
-        console.log(await feeConverter.targetChainFixedFee(31337, 292))
+    it("Get fixed fee", async function () {
+        // Fee per byte set to 0.001 FRM in deployAll()
+        const feePerByte = ethers.parseEther("0.001")
+        const payloadSize = 292n
+        expect(await ctx.chain1.feeConverter.fixedFee(payloadSize)).to.be.equal(payloadSize * feePerByte)
     })
 
-    it("check target chain gas price", async function () {
-        // TODO Check:
-        // Assume:
-        // Chain with ETH as native. Gas price of 2 gwei.
-        // ~0.02USD per FRM. $2500 ETH. So 125000 FRM per ETH
-        // 200000 gas tx cost on target chain in ETH = 200000 * 2 gwei = 0.0004 ETH
-        // 0.0004 ETH * 125000 FRM = 50 FRM for tx gas cost
+    it("Get target chain fee for tx execution", async function () {
+        const gasLimit = 200000n
+        const gasCostInTargetNative = gasLimit * CHAIN2_GAS_PRICE
+        const gasCostInFrm = gasCostInTargetNative * BNB_FRM_PRICE
 
-        console.log(await feeConverter.targetChainGasFee(31337, 200000))
+        expect(await ctx.chain1.feeConverter.targetChainGasFee(ctx.chain2.chainId, gasLimit)).to.be.equal(gasCostInFrm)
+    })
+
+    it("Get fixed fee in local chain native asset", async function () {
+        const payloadSize = 292n
+        const feePerByte = ethers.parseEther("0.001")
+        const fixFeeInNative = payloadSize * feePerByte / ETH_FRM_PRICE
+
+        expect(await ctx.chain1.feeConverter.fixedFeeNative(payloadSize)).to.be.equal(fixFeeInNative)
+    })
+
+    it("Get target chain fee for tx execution in local chain native asset", async function () {
+        const gasLimit = 200000n
+        const gasCostInTargetNative = gasLimit * CHAIN2_GAS_PRICE
+        const gasCostInFrm = gasCostInTargetNative * BNB_FRM_PRICE
+        const gasCostInEth = gasCostInFrm / ETH_FRM_PRICE
+
+        expect(await ctx.chain1.feeConverter.targetChainGasFeeNative(ctx.chain2.chainId, gasLimit)).to.be.equal(gasCostInEth)
     })
 })
