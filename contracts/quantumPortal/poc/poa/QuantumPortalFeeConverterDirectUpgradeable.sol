@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {Initializable, UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {WithAdminUpgradeable} from "foundry-contracts/contracts/contracts-upgradeable/common/WithAdminUpgradeable.sol";
 import {IQuantumPortalFeeConvertor} from "./IQuantumPortalFeeConvertor.sol";
-import "hardhat/console.sol";
 
 
 /**
@@ -22,8 +21,13 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
     struct QuantumPortalFeeConverterDirectStorageV001 {
         address qpFeeToken;
         uint256 feePerByte;
-        mapping(uint256 => uint256) feeTokenPriceList;
-        mapping(uint256 => uint256) targetChainGasPriceList;
+        mapping(uint256 => ChainData) chainDataList;
+    }
+
+    struct ChainData {
+        uint256 feeTokenPrice;
+        uint128 gasPrice;
+        bool isL2;
     }
 
     // keccak256(abi.encode(uint256(keccak256("ferrum.storage.quantumportalfeeconverterdirect.001")) - 1)) & ~bytes32(uint256(0xff))
@@ -40,12 +44,12 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
         return _getQuantumPortalFeeConverterDirectStorageV001().feePerByte;
     }
 
-    function feeTokenPriceList(uint256 chainId) external view returns (uint256) {
-        return _getQuantumPortalFeeConverterDirectStorageV001().feeTokenPriceList[chainId];
+    function feeTokenPrice(uint256 chainId) external view returns (uint256) {
+        return _getQuantumPortalFeeConverterDirectStorageV001().chainDataList[chainId].feeTokenPrice;
     }
 
-    function targetChainGasPriceList(uint256 chainId) external view returns (uint256) {
-        return _getQuantumPortalFeeConverterDirectStorageV001().targetChainGasPriceList[chainId];
+    function targetChainGasPrice(uint256 chainId) external view returns (uint256) {
+        return _getQuantumPortalFeeConverterDirectStorageV001().chainDataList[chainId].gasPrice;
     }
 
     function initialize(address initialOwnerAdmin) public initializer {
@@ -77,7 +81,7 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
         returns (uint256)
     {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        uint price = $.feeTokenPriceList[block.chainid];
+        uint price = $.chainDataList[block.chainid].feeTokenPrice;
         if (price == 0) {
             return 1;
         }
@@ -89,19 +93,19 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
      */
     function setChainGasPrices(
         uint256[] memory chainIds,
-        uint256[] memory nativeTokenPrices,
-        uint256[] memory gasPrices
+        uint256[] memory feeTokenPrices,
+        uint128[] memory gasPrices,
+        bool[] memory isL2
     ) external onlyAdmin {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        require(chainIds.length == nativeTokenPrices.length, "QPFCD: Invalid args");
+        require(chainIds.length == feeTokenPrices.length, "QPFCD: Invalid args");
         require(chainIds.length == gasPrices.length, "QPFCD: Invalid args");
         for(uint i=0; i<chainIds.length; i++) {
-            uint256 nativePrice = nativeTokenPrices[i];
-            uint256 gasPrice = gasPrices[i];
-            require(nativePrice != 0, "QPFCD: native price is zero");
-            require(gasPrice != 0, "QPFCD: fee price is zero");
-            $.feeTokenPriceList[chainIds[i]] = nativePrice;
-            $.targetChainGasPriceList[chainIds[i]] = gasPrice;
+            require(feeTokenPrices[i] != 0, "QPFCD: native price is zero");
+            require(gasPrices[i] != 0, "QPFCD: fee price is zero");
+            $.chainDataList[chainIds[i]].feeTokenPrice = feeTokenPrices[i];
+            $.chainDataList[chainIds[i]].gasPrice = gasPrices[i];
+            $.chainDataList[chainIds[i]].isL2 = isL2[i];
         }
     }
 
@@ -124,17 +128,18 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
 
     function targetChainGasFee(
         uint256 targetChainId,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) external view returns (uint256) {
-        return _targetChainGasFee(targetChainId, gasLimit);
+        return _targetChainGasFee(targetChainId, gasLimit, size);
     }
 
     function targetChainFee(
         uint256 targetChainId,
-        uint256 size,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) external view returns (uint256) {
-        return _fixedFee(size) + _targetChainGasFee(targetChainId, gasLimit);
+        return _fixedFee(size) + _targetChainGasFee(targetChainId, gasLimit, size);
     }
 
     function fixedFeeNative(uint256 size) external view returns (uint256) {
@@ -143,17 +148,18 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
 
     function targetChainGasFeeNative(
         uint256 targetChainId,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) external view returns (uint256) {
-        return _targetChainGasFeeNative(targetChainId, gasLimit);
+        return _targetChainGasFeeNative(targetChainId, gasLimit, size);
     }
 
     function targetChainFeeNative(
         uint256 targetChainId,
-        uint256 size,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) external view returns (uint256) {
-        return _fixedFeeNative(size) + _targetChainGasFeeNative(targetChainId, gasLimit);
+        return _fixedFeeNative(size) + _targetChainGasFeeNative(targetChainId, gasLimit, size);
     }
 
     function _fixedFee(
@@ -165,10 +171,21 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
 
     function _targetChainGasFee(
         uint256 targetChainId,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        return gasLimit * $.targetChainGasPriceList[targetChainId] * _targetChainGasTokenPrice(targetChainId);
+        uint256 executionCost = gasLimit * $.chainDataList[targetChainId].gasPrice * _targetChainGasTokenPrice(targetChainId);
+        
+        if (!$.chainDataList[targetChainId].isL2) {
+            return executionCost;
+        } else {
+            // Use an approximation for this
+            uint256 l1GasPrice = $.chainDataList[1].gasPrice;
+            require(l1GasPrice != 0, "QPFCD: L1 gas price not set");
+            uint256 l1Cost = ((256 + size) * 16) * l1GasPrice;
+            return executionCost + l1Cost;
+        }
     }
 
     /**
@@ -179,27 +196,32 @@ contract QuantumPortalFeeConverterDirectUpgradeable is
         uint256 targetChainId
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        return $.feeTokenPriceList[targetChainId];
+        return $.chainDataList[targetChainId].feeTokenPrice;
     }
 
     function _fixedFeeNative(
         uint256 size
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        return _fixedFee(size) / $.feeTokenPriceList[block.chainid];
+        return _fixedFee(size) / $.chainDataList[block.chainid].feeTokenPrice;
     }
 
     function _targetChainGasFeeNative(
         uint256 targetChainId,
-        uint256 gasLimit
+        uint256 gasLimit,
+        uint256 size
     ) internal view returns (uint256) {
         QuantumPortalFeeConverterDirectStorageV001 storage $ = _getQuantumPortalFeeConverterDirectStorageV001();
-        return _targetChainGasFee(targetChainId, gasLimit) / $.feeTokenPriceList[block.chainid];
+        return _targetChainGasFee(targetChainId, gasLimit, size) / $.chainDataList[block.chainid].feeTokenPrice;
     }
 
     function _getQuantumPortalFeeConverterDirectStorageV001() internal pure returns (QuantumPortalFeeConverterDirectStorageV001 storage $) {
         assembly {
             $.slot := QuantumPortalFeeConverterDirectStorageV001Location
         }
+    }
+
+    function _isL2(uint256 chainId) internal pure returns (bool) {
+        return chainId != 1;
     }
 }
